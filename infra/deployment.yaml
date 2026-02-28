@@ -1,0 +1,189 @@
+---
+# Customer Site Deployment (Laravel + Inertia + React)
+#
+# Serves the koereskole customer's public-facing website.
+# Each customer has a unique Docker image built from their forked repo.
+#
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: customer-site
+  namespace: {{CUSTOMER_SLUG}}
+  labels:
+    app: customer-site
+    customer: "{{CUSTOMER_ID}}"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: customer-site
+
+  template:
+    metadata:
+      labels:
+        app: customer-site
+        customer: "{{CUSTOMER_ID}}"
+    spec:
+      containers:
+        - name: customer-site
+          image: registry.scaleweb.dk/{{IMAGE_NAME}}:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+
+          env:
+            # Laravel core
+            - name: APP_ENV
+              value: "production"
+            - name: APP_DEBUG
+              value: "false"
+            - name: APP_NAME
+              value: "{{CUSTOMER_NAME}}"
+            - name: APP_URL
+              value: "https://{{CUSTOMER_DOMAIN}}"
+            - name: APP_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: koereskole-secrets
+                  key: APP_KEY
+
+            # Database (MariaDB)
+            - name: DB_CONNECTION
+              value: "mariadb"
+            - name: DB_HOST
+              value: "mariadb"
+            - name: DB_PORT
+              value: "3306"
+            - name: DB_DATABASE
+              value: "{{CUSTOMER_SLUG}}_db"
+            - name: DB_USERNAME
+              value: "{{CUSTOMER_SLUG}}_user"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mariadb-secrets
+                  key: PASSWORD
+
+            # Laravel drivers (all database-backed, no Redis needed)
+            - name: SESSION_DRIVER
+              value: "database"
+            - name: QUEUE_CONNECTION
+              value: "database"
+            - name: CACHE_STORE
+              value: "database"
+
+            # Stripe
+            - name: STRIPE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: koereskole-secrets
+                  key: STRIPE_SECRET
+            - name: STRIPE_PUBLISHABLE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: koereskole-secrets
+                  key: STRIPE_PUBLISHABLE_KEY
+
+            # Mail (AWS SES via HTTP API - outbound SMTP ports are blocked on this cluster)
+            - name: MAIL_MAILER
+              value: "ses"
+            - name: MAIL_FROM_ADDRESS
+              value: "noreply@{{CUSTOMER_DOMAIN}}"
+            - name: MAIL_FROM_NAME
+              value: "{{CUSTOMER_NAME}}"
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: ses-credentials
+                  key: access-key-id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ses-credentials
+                  key: secret-access-key
+            - name: AWS_DEFAULT_REGION
+              value: "eu-north-1"
+
+            # Branding
+            - name: BRAND_NAME
+              value: "{{CUSTOMER_NAME}}"
+            - name: BRAND_LOGO_PATH
+              valueFrom:
+                secretKeyRef:
+                  name: koereskole-secrets
+                  key: BRAND_LOGO_PATH
+                  optional: true
+            - name: BRAND_COLOR_PRIMARY
+              valueFrom:
+                secretKeyRef:
+                  name: koereskole-secrets
+                  key: BRAND_COLOR_PRIMARY
+                  optional: true
+            - name: BRAND_COLOR_SIDEBAR
+              valueFrom:
+                secretKeyRef:
+                  name: koereskole-secrets
+                  key: BRAND_COLOR_SIDEBAR
+                  optional: true
+            - name: BRAND_COLOR_ACCENT
+              valueFrom:
+                secretKeyRef:
+                  name: koereskole-secrets
+                  key: BRAND_COLOR_ACCENT
+                  optional: true
+
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+
+      imagePullSecrets:
+        - name: registry-credentials
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: customer-site
+  namespace: {{CUSTOMER_SLUG}}
+  labels:
+    app: customer-site
+    customer: "{{CUSTOMER_ID}}"
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 8000
+      protocol: TCP
+  selector:
+    app: customer-site

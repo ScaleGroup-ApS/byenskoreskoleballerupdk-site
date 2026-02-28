@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -e
+
+container_mode=${CONTAINER_MODE:-app}
+
+# Only run migrations from the main app container
+if [ "$container_mode" = "app" ]; then
+    echo "Uno momenti, migrerar databasen..."
+    php artisan migrate --force --no-interaction
+
+    if [ "$APP_ENV" = "production" ]; then
+        php artisan config:cache
+        php artisan route:cache
+        php artisan view:cache
+    fi
+fi
+
+if [ "$container_mode" = "horizon" ]; then
+    exec php artisan horizon
+elif [ "$container_mode" = "scheduler" ]; then
+    exec supercronic /etc/supercronic/laravel
+elif [ "$container_mode" = "ssr" ]; then
+    exec php artisan inertia:start-ssr --runtime=bun
+elif [ "$container_mode" = "reverb" ]; then
+    exec php artisan reverb:start
+else
+    exec /usr/bin/supervisord -c /etc/supervisord.conf
+fi

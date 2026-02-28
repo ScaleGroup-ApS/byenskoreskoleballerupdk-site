@@ -1,0 +1,18 @@
+---
+# Mail data PVC for mailserver
+# Layout:
+#   - mailboxes/ - Email storage
+#   - state/ - DKIM keys, Rspamd data, Dovecot indexes
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mail-data
+  namespace: {{CUSTOMER_SLUG}}
+  labels:
+    app: mailserver
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi

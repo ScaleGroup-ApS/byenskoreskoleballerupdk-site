@@ -1,0 +1,12 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mail-config
+  namespace: {{CUSTOMER_SLUG}}
+data:
+  postfix-main.cf: |
+    # Force IPv4-only outbound delivery.
+    # The cluster has no IPv6 routing, so Postfix must not attempt IPv6
+    # connections to external MX servers (e.g. Gmail's AAAA records).
+    inet_protocols = ipv4

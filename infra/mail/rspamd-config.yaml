@@ -1,0 +1,46 @@
+---
+# Rspamd spam filter configuration overrides
+# Mounted at /etc/rspamd/override.d in the mailserver container
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rspamd-config
+  namespace: {{CUSTOMER_SLUG}}
+  labels:
+    app: mailserver
+data:
+  # Worker configuration
+  worker-normal.inc: |
+    # Normal worker settings
+    bind_socket = "*:11333";
+
+  worker-controller.inc: |
+    # Controller worker for web interface
+    bind_socket = "*:11334";
+    # Disable password for internal use
+    enable_password = null;
+    password = null;
+
+  # Redis configuration
+  redis.conf: |
+    # Redis backend configuration
+    servers = "redis.{{CUSTOMER_SLUG}}.svc.cluster.local:6379";
+
+  # Milter headers configuration
+  milter_headers.conf: |
+    # Add custom headers
+    use = ["authentication-results"];
+
+  # DKIM signing configuration  
+  dkim_signing.conf: |
+    # DKIM signing settings
+    # Keys should be generated and stored in /var/mail-state/dkim/
+    path = "/var/mail-state/dkim/$selector.private";
+    selector = "mail";
+    # Sign outbound mail for domain
+    # domain {
+    #   {{CUSTOM_DOMAIN}} {
+    #     path = "/var/mail-state/dkim/mail.private";
+    #     selector = "mail";
+    #   }
+    # }

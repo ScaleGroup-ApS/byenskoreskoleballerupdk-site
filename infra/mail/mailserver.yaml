@@ -1,0 +1,261 @@
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mailserver
+  namespace: {{CUSTOMER_SLUG}}
+  labels:
+    app: mailserver
+    app.kubernetes.io/name: mailserver
+    app.kubernetes.io/component: mail
+spec:
+  serviceName: mailserver
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mailserver
+  template:
+    metadata:
+      labels:
+        app: mailserver
+        app.kubernetes.io/name: mailserver
+        app.kubernetes.io/component: mail
+    spec:
+      hostname: mail
+      containers:
+      - name: mailserver
+        image: ghcr.io/docker-mailserver/docker-mailserver:latest
+        ports:
+        # Standard ports (for internal use)
+        - containerPort: 25
+          name: smtp
+          protocol: TCP
+        - containerPort: 587
+          name: submission
+          protocol: TCP
+        - containerPort: 465
+          name: submissions
+          protocol: TCP
+        - containerPort: 143
+          name: imap
+          protocol: TCP
+        - containerPort: 993
+          name: imaps
+          protocol: TCP
+        - containerPort: 4190
+          name: sieve
+          protocol: TCP
+        - containerPort: 11334
+          name: rspamd-web
+          protocol: TCP
+
+        # PROXY protocol ports (for Traefik ingress)
+        - containerPort: 12525
+          name: smtp-proxy
+          protocol: TCP
+        - containerPort: 10587
+          name: sub-proxy
+          protocol: TCP
+        - containerPort: 10465
+          name: subs-proxy
+          protocol: TCP
+        - containerPort: 10143
+          name: imap-proxy
+          protocol: TCP
+        - containerPort: 10993
+          name: imaps-proxy
+          protocol: TCP
+        env:
+        # Basic configuration - use customer's own domain for mail
+        - name: OVERRIDE_HOSTNAME
+          value: "mail.{{CUSTOMER_DOMAIN}}"
+        - name: DOMAINNAME
+          value: "{{CUSTOMER_DOMAIN}}"
+        - name: ONE_DIR
+          value: "1"
+        - name: DMS_DEBUG
+          value: "0"
+        - name: LOG_LEVEL
+          value: "info"
+
+        # Rspamd spam filtering (enabled)
+        - name: ENABLE_RSPAMD
+          value: "1"
+        - name: ENABLE_RSPAMD_REDIS
+          value: "1"
+        - name: RSPAMD_REDIS_HOST
+          value: "redis.{{CUSTOMER_SLUG}}.svc.cluster.local"
+        - name: RSPAMD_REDIS_PORT
+          value: "6379"
+        - name: RSPAMD_REDIS_DB
+          value: "0"
+
+        # ClamAV (disabled due to resource constraints)
+        - name: ENABLE_CLAMAV
+          value: "0"
+
+        # SpamAssassin (disabled, using Rspamd instead)
+        - name: ENABLE_SPAMASSASSIN
+          value: "0"
+
+        # DKIM/DMARC/SPF
+        - name: ENABLE_OPENDKIM
+          value: "1"
+        - name: ENABLE_OPENDMARC
+          value: "1"
+        - name: ENABLE_POLICYD_SPF
+          value: "1"
+
+        # Dovecot settings
+        - name: ENABLE_QUOTAS
+          value: "1"
+        - name: ENABLE_IMAP
+          value: "1"
+        - name: ENABLE_POP3
+          value: "0"
+
+        # No outbound relay - all SMTP ports (25, 465, 587, 2587) are blocked by the
+        # cloud provider. Transactional mail is sent via AWS SES HTTP API from the
+        # Laravel app (MAIL_MAILER=ses). This mailserver handles inbound IMAP only.
+
+        # TLS/SSL - disabled by default, configure manually or via cert-manager
+        # - name: SSL_TYPE
+        #   value: "letsencrypt"
+        - name: PERMIT_DOCKER
+          value: "network"
+
+        # Message size limits
+        - name: POSTFIX_MESSAGE_SIZE_LIMIT
+          value: "52428800"  # 50MB
+        - name: POSTFIX_MAILBOX_SIZE_LIMIT
+          value: "0"  # Quota enforced by Dovecot
+
+        # Fail2ban (optional, disable to save resources)
+        - name: ENABLE_FAIL2BAN
+          value: "0"
+
+        # Update check (disable)
+        - name: UPDATE_CHECK_INTERVAL
+          value: "0"
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+
+        volumeMounts:
+        - name: data
+          mountPath: /var/mail
+          subPath: mail/mailboxes
+        - name: data
+          mountPath: /var/mail-state
+          subPath: mail/state
+        - name: mail-config
+          mountPath: /tmp/docker-mailserver
+        - name: rspamd-override
+          mountPath: /etc/rspamd/override.d
+        - name: letsencrypt
+          mountPath: /etc/letsencrypt
+          readOnly: false
+
+        livenessProbe:
+          exec:
+            command:
+            - /bin/bash
+            - -c
+            - supervisorctl status | grep -E "postfix|dovecot" | grep RUNNING
+          initialDelaySeconds: 120
+          periodSeconds: 60
+          timeoutSeconds: 10
+          failureThreshold: 3
+
+        readinessProbe:
+          tcpSocket:
+            port: 587
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: mail-data
+      - name: mail-config
+        configMap:
+          name: mail-config
+      - name: rspamd-override
+        configMap:
+          name: rspamd-config
+      - name: letsencrypt
+        emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mailserver
+  namespace: {{CUSTOMER_SLUG}}
+  labels:
+    app: mailserver
+    app.kubernetes.io/name: mailserver
+spec:
+  type: ClusterIP
+  ports:
+  # PROXY protocol ports (used by Traefik IngressRouteTCP)
+  - port: 12525
+    targetPort: 12525
+    protocol: TCP
+    name: smtp-proxy
+  - port: 10587
+    targetPort: 10587
+    protocol: TCP
+    name: sub-proxy
+  - port: 10465
+    targetPort: 10465
+    protocol: TCP
+    name: subs-proxy
+  - port: 10143
+    targetPort: 10143
+    protocol: TCP
+    name: imap-proxy
+  - port: 10993
+    targetPort: 10993
+    protocol: TCP
+    name: imaps-proxy
+
+  # Standard ports (for internal/testing use)
+  - port: 25
+    targetPort: 25
+    protocol: TCP
+    name: smtp
+  - port: 587
+    targetPort: 587
+    protocol: TCP
+    name: submission
+  - port: 465
+    targetPort: 465
+    protocol: TCP
+    name: submissions
+  - port: 143
+    targetPort: 143
+    protocol: TCP
+    name: imap
+  - port: 993
+    targetPort: 993
+    protocol: TCP
+    name: imaps
+  - port: 4190
+    targetPort: 4190
+    protocol: TCP
+    name: sieve
+  - port: 11334
+    targetPort: 11334
+    protocol: TCP
+    name: rspamd-web
+
+  selector:
+    app: mailserver

@@ -1,0 +1,182 @@
+x-logging: &default-logging
+  driver: 'json-file'
+  options:
+    max-size: "50m"
+    max-file: "10"
+    compress: "true"
+
+x-healthcheck: &default-healthcheck
+  interval: 1s
+  retries: 10
+  timeout: 3s
+
+x-base: &base
+  depends_on:
+    mariadb:
+      condition: service_healthy
+  build:
+    context: .
+    dockerfile: Dockerfile
+    args:
+      USER_ID: ${HOST_UID:-1000}
+      GROUP_ID: ${HOST_GID:-1000}
+  image: 'scalegroup-aps/koereskole-template:latest'
+  user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+  ulimits:
+    nofile:
+      soft: 65536
+      hard: 65536
+  security_opt:
+    - no-new-privileges:true
+  networks:
+    - stack
+  env_file:
+    - .env
+  environment:
+    DB_HOST: mariadb
+  volumes:
+    - './storage/app/public:/var/www/html/storage/app/public'
+    - './storage/logs:/var/www/html/storage/logs'
+  logging: *default-logging
+  restart: unless-stopped
+
+services:
+  traefik:
+    image: traefik:v3.6
+    restart: unless-stopped
+    stop_grace_period: 35s
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - "--log.level=ERROR"
+      - "--log.format=common"
+      - "--api=true"
+      - "--accesslog=true"
+      - "--accesslog.format=common"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedByDefault=false"
+      - "--providers.docker.network=stack"
+      - "--entryPoints.traefik.address=:8190"
+      - "--entryPoints.app.address=:80"
+      - "--entryPoints.app.http.redirections.entryPoint.to=app-secure"
+      - "--entryPoints.app.http.redirections.entryPoint.scheme=https"
+      - "--entryPoints.app-secure.address=:443"
+      - "--entryPoints.app-secure.http3=true"
+      - "--entryPoints.app-secure.transport.lifeCycle.graceTimeOut=30s"
+      - "--entryPoints.phpmyadmin.address=:8080"
+    ports:
+      - "127.0.0.1:${TRAEFIK_PORT:-8190}:8190" # Traefik dashboard
+      - "${APP_PORT:-80}:80" # HTTP
+      - "${APP_PORT_SSL:-443}:443" # HTTPS
+      - "${APP_PORT_SSL:-443}:443/udp" # HTTP/3
+      - "127.0.0.1:${PMA_PORT:-8080}:8080" # phpMyAdmin
+    networks:
+      - stack
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    logging: *default-logging
+    labels:
+      traefik.enable: true
+      traefik.http.routers.traefik.rule: HostRegexp(`.+`)
+      traefik.http.routers.traefik.service: api@internal
+      traefik.http.routers.traefik.entryPoints: traefik
+
+  app:
+    <<: *base
+    healthcheck:
+      test: [ "CMD", "curl", "--fail", "--max-time", "10", "localhost:8000/up" ]
+      <<: *default-healthcheck
+    stop_grace_period: 35s
+    labels:
+      traefik.enable: true
+      traefik.http.routers.app-secure.rule: HostRegexp(`.+`)
+      traefik.http.routers.app-secure.entryPoints: app-secure
+      traefik.http.routers.app-secure.priority: 10
+      traefik.http.routers.app-secure.service: app-service
+      traefik.http.routers.app-secure.tls: true
+      traefik.http.routers.app-secure.middlewares: security-headers
+      traefik.http.services.app-service.loadbalancer.server.port: 8000
+      traefik.http.services.app-service.loadbalancer.healthCheck.path: "/up"
+      traefik.http.services.app-service.loadbalancer.healthCheck.hostname: "localhost"
+      traefik.http.services.app-service.loadbalancer.healthCheck.port: 8000
+      traefik.http.services.app-service.loadbalancer.healthCheck.interval: 2s
+      traefik.http.services.app-service.loadbalancer.healthCheck.timeout: 5s
+      traefik.http.middlewares.limit.buffering.maxRequestBodyBytes: 560000000
+      traefik.http.middlewares.security-headers.headers.accesscontrolmaxage: 100
+      traefik.http.middlewares.security-headers.headers.addvaryheader: true
+      traefik.http.middlewares.security-headers.headers.hostsproxyheaders: X-Forwarded-Host
+      traefik.http.middlewares.security-headers.headers.stsseconds: 63072000
+      traefik.http.middlewares.security-headers.headers.stsincludesubdomains: true
+      traefik.http.middlewares.security-headers.headers.stspreload: true
+      traefik.http.middlewares.security-headers.headers.forcestsheader: true
+      traefik.http.middlewares.security-headers.headers.customFrameOptionsValue: SAMEORIGIN
+      traefik.http.middlewares.security-headers.headers.contenttypenosniff: true
+      traefik.http.middlewares.security-headers.headers.browserxssfilter: true
+      traefik.http.middlewares.security-headers.headers.referrerpolicy: strict-origin-when-cross-origin
+      traefik.http.middlewares.security-headers.headers.permissionspolicy: "camera=(), geolocation=(), microphone=(), payment=(), usb=(), interest-cohort=(), gyroscope=()"
+      traefik.http.middlewares.security-headers.headers.customresponseheaders.X-Robots-Tag: "noindex, nofollow"
+
+  scheduler:
+    <<: *base
+    environment:
+      CONTAINER_MODE: scheduler
+    labels:
+      traefik.enable: false
+
+  mariadb:
+    image: 'mariadb:11'
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      MARIADB_DATABASE: '${DB_DATABASE}'
+      MARIADB_ROOT_PASSWORD: '${DB_PASSWORD}'
+      MARIADB_AUTO_UPGRADE: '1'
+    volumes:
+      - 'stack-mariadb:/var/lib/mysql'
+    networks:
+      - stack
+    healthcheck:
+      test: [ "CMD", "healthcheck.sh", "--connect", "--innodb_initialized" ]
+      <<: *default-healthcheck
+    restart: unless-stopped
+    logging: *default-logging
+    labels:
+      traefik.enable: false
+
+  phpmyadmin:
+    image: 'phpmyadmin:latest'
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      PMA_HOST: mariadb
+      PMA_PORT: 3306
+      MYSQL_ROOT_PASSWORD: '${DB_ROOT_PASSWORD:-rootpassword}'
+    networks:
+      - stack
+    restart: unless-stopped
+    logging: *default-logging
+    labels:
+      traefik.enable: true
+      traefik.http.routers.phpmyadmin.rule: Host(`localhost`)
+      traefik.http.routers.phpmyadmin.entryPoints: phpmyadmin
+
+networks:
+  stack:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: 1450
+
+volumes:
+  stack-mariadb:
+    driver: local

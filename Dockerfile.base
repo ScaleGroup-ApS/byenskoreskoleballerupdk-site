@@ -1,0 +1,59 @@
+ARG PHP_VERSION=8.4
+ARG FRANKENPHP_VERSION=1.11
+
+FROM dunglas/frankenphp:${FRANKENPHP_VERSION}-php${PHP_VERSION}
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    TERM=xterm-color \
+    OCTANE_SERVER=frankenphp \
+    USER=laravel \
+    ROOT=/var/www/html \
+    APP_ENV=production \
+    COMPOSER_FUND=0 \
+    COMPOSER_MAX_PARALLEL_HTTP=48
+
+WORKDIR ${ROOT}
+
+SHELL ["/bin/bash", "-eou", "pipefail", "-c"]
+
+RUN apt-get update; \
+    apt-get upgrade -yqq; \
+    apt-get install -yqq --no-install-recommends --show-progress \
+    curl \
+    wget \
+    unzip \
+    ca-certificates \
+    supervisor \
+    && curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr bash \
+    && install-php-extensions \
+    pcntl \
+    mbstring \
+    bcmath \
+    pdo_mysql \
+    opcache \
+    zip \
+    intl \
+    gd \
+    exif \
+    sockets \
+    && apt-get -y autoremove \
+    && apt-get clean \
+    && docker-php-source delete \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+RUN arch="$(uname -m)" \
+    && case "$arch" in \
+    armhf) _cronic_fname='supercronic-linux-arm' ;; \
+    aarch64) _cronic_fname='supercronic-linux-arm64' ;; \
+    x86_64) _cronic_fname='supercronic-linux-amd64' ;; \
+    x86) _cronic_fname='supercronic-linux-386' ;; \
+    *) echo >&2 "error: unsupported architecture: $arch"; exit 1 ;; \
+    esac \
+    && wget -q "https://github.com/aptible/supercronic/releases/download/v0.2.38/${_cronic_fname}" \
+    -O /usr/bin/supercronic \
+    && chmod +x /usr/bin/supercronic \
+    && mkdir -p /etc/supercronic \
+    && echo "*/1 * * * * php ${ROOT}/artisan schedule:run --no-interaction" > /etc/supercronic/laravel
+
+
+RUN cp ${PHP_INI_DIR}/php.ini-production ${PHP_INI_DIR}/php.ini

@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{CUSTOMER_SLUG}}
+  labels:
+    name: {{CUSTOMER_SLUG}}
+    customer-id: "{{CUSTOMER_ID}}"
+    customer-slug: {{CUSTOMER_SLUG}}

@@ -1,0 +1,69 @@
+---
+# HTTP-to-HTTPS redirect middleware
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: https-redirect
+  namespace: {{CUSTOMER_SLUG}}
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+
+---
+# HTTP IngressRoute (for ACME challenge and redirect to HTTPS)
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: site-http
+  namespace: {{CUSTOMER_SLUG}}
+  labels:
+    app: customer-site
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`{{CUSTOMER_DOMAIN}}`) || Host(`{{CUSTOMER_SLUG}}.scaledev.dk`)
+      kind: Rule
+      middlewares:
+        - name: https-redirect
+      services:
+        - name: customer-site
+          port: 80
+
+---
+# Certificate managed by cert-manager
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: site-tls
+  namespace: {{CUSTOMER_SLUG}}
+spec:
+  secretName: site-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - {{CUSTOMER_DOMAIN}}
+    - {{CUSTOMER_SLUG}}.scaledev.dk
+
+---
+# HTTPS IngressRoute — all traffic goes to customer-site (no WordPress routing)
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: site
+  namespace: {{CUSTOMER_SLUG}}
+  labels:
+    app: customer-site
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`{{CUSTOMER_DOMAIN}}`) || Host(`{{CUSTOMER_SLUG}}.scaledev.dk`)
+      kind: Rule
+      services:
+        - name: customer-site
+          port: 80
+  tls:
+    secretName: site-tls

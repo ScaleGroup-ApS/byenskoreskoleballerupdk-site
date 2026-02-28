@@ -1,0 +1,78 @@
+apiVersion: k8s.mariadb.com/v1alpha1
+kind: MariaDB
+metadata:
+  name: mariadb
+  namespace: {{CUSTOMER_SLUG}}
+spec:
+  rootPasswordSecretKeyRef:
+    name: mariadb-secrets
+    key: ROOT_PASSWORD
+
+  database: {{CUSTOMER_SLUG}}_db
+  username: {{CUSTOMER_SLUG}}_user
+  passwordSecretKeyRef:
+    name: mariadb-secrets
+    key: PASSWORD
+
+  image: mariadb:11.6
+
+  port: 3306
+
+  storage:
+    size: 10Gi
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+  myCnf: |
+    [mariadb]
+    bind-address=*
+    default_storage_engine=InnoDB
+    binlog_format=row
+    innodb_autoinc_lock_mode=2
+    max_allowed_packet=256M
+    innodb_buffer_pool_size=128M
+    innodb_log_file_size=64M
+
+  # Service configuration
+  service:
+    type: ClusterIP
+
+  # Connection configuration
+  connection:
+    secretName: mariadb-connection
+    secretTemplate:
+      key: dsn
+---
+apiVersion: k8s.mariadb.com/v1alpha1
+kind: Backup
+metadata:
+  name: mariadb-backup
+  namespace: {{CUSTOMER_SLUG}}
+spec:
+  mariaDbRef:
+    name: mariadb
+
+  schedule:
+    cron: "0 2 * * *"  # Daily at 2 AM UTC
+    suspend: false
+
+  maxRetention: 720h  # 30 days
+
+  storage:
+    s3:
+      bucket: {{S3_BUCKET_NAME}}
+      endpoint: {{S3_ENDPOINT}}
+      region: {{S3_REGION}}
+      prefix: {{CUSTOMER_SLUG}}/
+      accessKeyIdSecretKeyRef:
+        name: s3-credentials
+        key: access-key-id
+      secretAccessKeySecretKeyRef:
+        name: s3-credentials
+        key: secret-access-key
