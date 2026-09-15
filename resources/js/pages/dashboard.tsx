@@ -1,11 +1,11 @@
+import type { EventClickArg } from '@fullcalendar/core';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import type { DateClickArg } from '@fullcalendar/interaction';
 import interactionPlugin from '@fullcalendar/interaction';
 import FullCalendar from '@fullcalendar/react';
 import { Form, Head, Link, router, useForm } from '@inertiajs/react';
-import { CalendarDays, CheckCircle2, Plus, TrendingDown, Users, Wallet, XCircle } from 'lucide-react';
+import { CalendarDays, CheckCircle2, TrendingDown, Users, Wallet, XCircle } from 'lucide-react';
 import { useState } from 'react';
-import { approve, reject } from '@/actions/App/Http/Controllers/Enrollment/EnrollmentApprovalController';
 import Heading from '@/components/heading';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -28,11 +28,12 @@ import {
 } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
 import AppLayout from '@/layouts/app-layout';
+import type { BreadcrumbItem } from '@/types';
+import { approve, reject } from '@/actions/App/Http/Controllers/Enrollment/EnrollmentApprovalController';
 import { dashboard } from '@/routes';
 import { show as showCourse } from '@/routes/courses';
 import { index as enrollmentsIndex } from '@/routes/enrollments';
 import { store as storeCourse } from '@/routes/offers/courses';
-import type { BreadcrumbItem } from '@/types';
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Dashboard', href: dashboard().url }];
 
@@ -118,7 +119,7 @@ export default function Dashboard({
         color: 'var(--color-primary)',
     }));
 
-    function handleEventClick(info: import('@fullcalendar/core').EventClickArg) {
+    function handleEventClick(info: EventClickArg) {
         const id = info.event.id ? Number(info.event.id) : null;
         if (id) { router.visit(showCourse(id).url); }
     }

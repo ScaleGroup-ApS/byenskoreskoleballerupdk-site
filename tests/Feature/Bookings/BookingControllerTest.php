@@ -31,6 +31,7 @@ test('admin can create a booking', function () {
     $student = Student::factory()->create();
     $instructor = User::factory()->instructor()->create();
     $vehicle = Vehicle::factory()->create();
+    $startsAt = now()->addWeek()->setTime(10, 0);
 
     actingAs($admin)
         ->post(route('bookings.store'), [
@@ -38,8 +39,8 @@ test('admin can create a booking', function () {
             'instructor_id' => $instructor->id,
             'vehicle_id' => $vehicle->id,
             'type' => 'driving_lesson',
-            'starts_at' => '2026-03-10 10:00:00',
-            'ends_at' => '2026-03-10 10:45:00',
+            'starts_at' => $startsAt->toDateTimeString(),
+            'ends_at' => $startsAt->copy()->addMinutes(45)->toDateTimeString(),
         ])
         ->assertRedirect(route('bookings.index'));
 
@@ -50,12 +51,13 @@ test('booking store rejects conflict', function () {
     $admin = User::factory()->create();
     $student = Student::factory()->create();
     $instructor = User::factory()->instructor()->create();
+    $startsAt = now()->addWeek()->setTime(10, 0);
 
     Booking::factory()->create([
         'student_id' => $student->id,
         'instructor_id' => $instructor->id,
-        'starts_at' => '2026-03-10 10:00:00',
-        'ends_at' => '2026-03-10 10:45:00',
+        'starts_at' => $startsAt,
+        'ends_at' => $startsAt->copy()->addMinutes(45),
     ]);
 
     actingAs($admin)
@@ -63,8 +65,8 @@ test('booking store rejects conflict', function () {
             'student_id' => $student->id,
             'instructor_id' => $instructor->id,
             'type' => 'driving_lesson',
-            'starts_at' => '2026-03-10 10:15:00',
-            'ends_at' => '2026-03-10 11:00:00',
+            'starts_at' => $startsAt->copy()->addMinutes(15)->toDateTimeString(),
+            'ends_at' => $startsAt->copy()->addHour()->toDateTimeString(),
         ])
         ->assertSessionHasErrors('conflicts');
 });
