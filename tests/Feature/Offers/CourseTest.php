@@ -7,17 +7,18 @@ use App\Models\User;
 test('admin can add a course date to an offer', function () {
     $admin = User::factory()->create();
     $offer = Offer::factory()->create();
+    $startsAt = now()->addMonth()->setTime(9, 0);
 
     $this->actingAs($admin)
         ->from(route('offers.edit', $offer))
         ->post(route('offers.courses.store', $offer), [
-            'start_at' => '2026-06-01 09:00:00',
-            'end_at' => '2026-06-01 17:00:00',
+            'start_at' => $startsAt->toDateTimeString(),
+            'end_at' => $startsAt->copy()->addHours(8)->toDateTimeString(),
         ])
         ->assertRedirect(route('offers.edit', $offer));
 
     expect(Course::count())->toBe(1);
-    expect(Course::first()->start_at->format('Y-m-d'))->toBe('2026-06-01');
+    expect(Course::first()->start_at->toDateTimeString())->toBe($startsAt->toDateTimeString());
     expect(Course::first()->offer_id)->toBe($offer->id);
 });
 
